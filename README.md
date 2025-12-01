@@ -166,9 +166,7 @@ Log in to the new registry
 Build + Tag + Push Docker image
 
   docker build -t poker-advisor-test .
-
   docker tag poker-advisor-test pokerregistrytestwh.azurecr.io/poker-advisor:v2
-
   docker push pokerregistrytestwh.azurecr.io/poker-advisor:v2
 
 Ensure required Azure providers
