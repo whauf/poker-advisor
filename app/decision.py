@@ -1327,22 +1327,26 @@ def decide_preflop(state: PreflopState) -> dict:
 # ----------------------------------------------------
 # POST-FLOP LOGIC
 # ----------------------------------------------------
+# ----------------------------------------------------
+# POST-FLOP LOGIC
+# ----------------------------------------------------
 def decide_postflop(state):
 
     hero = state.hero_cards
     board = state.board
-    opponents = state.opponents or 1
+    opponents = getattr(state, "opponents", None) or 1
     facing = getattr(state, "facing_action", {}) or {}
+    street = getattr(state, "street", "flop")
 
-    # Convert to eval7 Cards
+    # Convert cards
     hero_cards = [eval7.Card(c) for c in hero]
     board_cards = [eval7.Card(c) for c in board]
 
-    # EQUITY
+    # Equity
     eqh, eqv, tie, dist = equity_vs_random_opponents(hero_cards, board_cards)
-    eq = eqh  # hero equity
+    eq = eqh
 
-    # Draw + hand classification
+    # Hand + draws
     hand_info = analyze_hand(hero, board)
     hand_label = hand_info["hand_label"]
     hand_rank = hand_info["hand_rank"]
@@ -1351,54 +1355,93 @@ def decide_postflop(state):
     action_type = facing.get("type")
     amount = facing.get("amount")
 
-    # Base return object (always include analysis)
+    # Base return data
     result = {
         "hero_equity": round(eqh, 2),
-        "villain_equity": round(eqv % 100, 2),
+        "villain_equity": round(eqv, 2),
         "tie": round(tie, 2),
-        "equity_raw": eqh,     # <-- add this
+        "equity_raw": eq,
         "board": board,
         "hand": hero,
         "hand_label": hand_label,
         "hand_rank": hand_rank,
         "draws": draws,
-        "equity_raw": eq
     }
 
-    # ---------------------------
-    # CASE 1: FACING A BET
-    # ---------------------------
-    # treat raise & bet the same for facing aggression logic
+    # -------------------------------------------------
+    # Compute pot_before once, safely
+    # -------------------------------------------------
+    raw_pot = getattr(state, "pot", None)
+    pot_before = None
+
+    if raw_pot not in (None, ""):
+        try:
+            pot_before = float(raw_pot)
+        except (TypeError, ValueError):
+            pot_before = None
+
+    if pot_before is None:
+        pot_hint = facing.get("pot_from_text")
+        if pot_hint not in (None, ""):
+            try:
+                pot_before = float(pot_hint)
+            except (TypeError, ValueError):
+                pot_before = 0.0
+        else:
+            pot_before = 0.0
+
+    # -------------------------------------------------
+    # CASE 1: FACING ACTION (bet / raise / jam)
+    # -------------------------------------------------
     if action_type in ("bet", "raise") and amount is not None:
-        pot_before = state.pot or facing.get("pot_from_text") or 0
+        # Normal bet / raise
+        call_eval = evaluate_facing_bet_or_raise(
+            hero_eq=eq,
+            hand_rank=hand_rank,
+            pot_before=pot_before,
+            bet_size=amount,
+            street=street,
+            position=getattr(state, "position", None),
+            stack=getattr(state, "stack", None),
+        )
 
-    call_eval = evaluate_facing_bet_or_raise(
-        hero_eq=eq,
-        hand_rank=hand_rank,
-        pot_before=pot_before,
-        bet_size=amount,
-        street="flop",
-        position=state.position
-    )
+        return {
+            **result,
+            "action": call_eval["action"],
+            "reason": call_eval["label"],
+            "recommended": call_eval,
+            "facing_aggression": facing,
+        }
 
-    return {
-        **result,
-        "action": call_eval["action"],
-        "reason": call_eval["label"],
-        "recommended": call_eval,
-        "facing_aggression": facing
-    }
+    if action_type == "jam" and amount is not None:
+        jam_eval = evaluate_facing_jam(
+            hero_eq=eq,
+            hand_rank=hand_rank,
+            pot=pot_before,
+            jam_size=amount,
+            street=street,
+            position=getattr(state, "position", None),
+        )
 
+        return {
+            **result,
+            "action": jam_eval["action"],
+            "reason": jam_eval["label"],
+            "recommended": jam_eval,
+            "facing_aggression": facing,
+        }
 
-    # ---------------------------
-    # CASE 2: NO BET → WE BET
-    # ---------------------------
+    # -------------------------------------------------
+    # CASE 2: NO BET → WE ARE THE AGGRESSOR
+    # -------------------------------------------------
+    pot_for_bet = pot_before  # use same resolved pot
+
     bet_eval = compute_bet_sizing(
         hero_eq=eq,
-        pot = getattr(state, "pot", None) or facing.get("pot_from_text") or 0,
-        street="flop",
+        pot=pot_for_bet,
+        street=street,
         board_codes=board,
-        opponents=opponents
+        opponents=opponents,
     )
 
     return {
@@ -1407,5 +1450,5 @@ def decide_postflop(state):
         "bet_options": bet_eval["options"],
         "recommended": bet_eval["recommended"],
         "reason": bet_eval["recommended"]["label"],
-        "facing_aggression": None
+        "facing_aggression": None,
     }
