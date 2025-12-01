@@ -46,6 +46,9 @@ This project implements a fully containerized poker advisor service that is able
         Public Endpoint: Placeholder (to be replaced)
         Ingress: HTTPS
 
+![Architecture](assets/arch_for_ds_project.png)
+
+
 
 3) How to Run (Local)
 
